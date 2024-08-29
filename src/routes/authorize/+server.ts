@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { authorize } from '$lib/auth';
 import type { AuthorizeParams } from '$lib/types';
 
-export const GET: RequestHandler = async ({ url }) => {
+export const GET: RequestHandler = async ({ url, cookies }) => {
 	try {
 		const params: AuthorizeParams = {
 			client_id: url.searchParams.get('client_id') || '',
@@ -15,6 +15,14 @@ export const GET: RequestHandler = async ({ url }) => {
 		};
 
 		const [redirectUrl, sessionId] = await authorize(params);
+
+		cookies.set('session', sessionId, {
+			httpOnly: true,
+			secure: true,
+			sameSite: 'strict',
+			maxAge: 3600,
+			path: '/'
+		});
 
 		return json(
 			{ redirect_url: redirectUrl },
