@@ -1,22 +1,29 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { createSolanaRpc } from '@solana/web3.js';
-
 	import { WalletAdapterNetwork } from '@bewinxed/wallet-adapter-base';
 	import { WalletMultiButton } from '@bewinxed/wallet-adapter-svelte-ui';
 	import { useSolana } from '@bewinxed/wallet-adapter-svelte';
 	import { Cookie } from 'oslo/cookie';
 	import type { PageData } from './$types';
+	import type { SolanaSignInInput } from '@solana/wallet-standard-features';
 
-	// TODO: REMOVE DEFAULTS:
-	// main.ts will parse the params from the server
 	const {
 		data
 	}: {
 		data: PageData;
 	} = $props();
 
-	const { domain, nonce, redirect, state: pageState, oidc_nonce, client_id } = $derived(data);
+	let {
+		domain,
+		nonce,
+		redirect,
+		state: pageState,
+		oidc_nonce,
+		client_id,
+		response_type,
+		scope
+	} = $derived(data);
 
 	let status = $state('Not Logged In');
 
@@ -30,7 +37,7 @@
 		logo_uri?: string;
 		client_name?: string;
 		client_uri?: string;
-	} = {};
+	} = $state({});
 
 	onMount(async () => {
 		try {
@@ -52,66 +59,102 @@
 
 		if (wallet.address) {
 			try {
+				const issuedAt = new Date().toISOString();
 				const expirationTime = new Date(new Date().getTime() + 2 * 24 * 60 * 60 * 1000); // 48h
 
-				const message = `You are signing-in to ${window.location.host}.
-Address: ${wallet.address}
-Nonce: ${nonce}
-Expiration: ${expirationTime.toISOString()}
-URI: ${window.location.origin}
-Version: 1
-Resources: ${redirect}`;
+				const message = {
+					domain: window.location.host,
+					address: wallet.address,
+					statement: `Sign in with Solana to ${client_metadata.client_name || domain}`,
+					uri: window.location.origin,
+					version: '1',
+					chainId: '1', // Solana mainnet
+					nonce: nonce,
+					issuedAt: issuedAt,
+					expirationTime: expirationTime.toISOString(),
+					resources: [redirect]
+				};
 
-				const encodedMessage = new TextEncoder().encode(message);
+				const encodedMessage = new TextEncoder().encode(JSON.stringify(message));
 				const signedMessage = await wallet.signMessage(encodedMessage);
 
 				const session = {
 					publicKey: wallet.address,
-					message: message,
-					signature: signedMessage
+					message: JSON.stringify(message),
+					signature: Array.from(signedMessage) // Convert Uint8Array to regular array for JSON serialization
 				};
 
-				const cookie = new Cookie('solana_session', JSON.stringify(session), {
-					expires: expirationTime
+				const cookie = new Cookie('siws', JSON.stringify(session), {
+					expires: expirationTime,
+					path: '/',
+					sameSite: 'strict',
+					secure: true
 				});
 
 				document.cookie = cookie.serialize();
 
-				let oidc_nonce_param = '';
-				if (oidc_nonce != null && oidc_nonce !== '') {
-					oidc_nonce_param = `&oidc_nonce=${oidc_nonce}`;
-				}
+				// Redirect to the authorization endpoint
+				const authorizationParams = new URLSearchParams({
+					response_type: response_type || 'code',
+					client_id: client_id,
+					redirect_uri: redirect,
+					scope: scope || 'openid',
+					state: pageState,
+					nonce: oidc_nonce || ''
+				});
 
-				window.location.replace(
-					`/sign_in?redirect_uri=${encodeURI(redirect)}&state=${encodeURI(pageState)}&client_id=${encodeURI(client_id)}${encodeURI(oidc_nonce_param)}`
-				);
+				window.location.href = `/authorize?${authorizationParams.toString()}`;
 			} catch (e) {
 				console.error(e);
+				status = 'Error: ' + (e as Error).message;
 			}
 		}
+	}
+
+	function generateTestParams() {
+		const testDomain = 'test.example.com';
+		const testNonce = Math.random().toString(36).substring(2, 15);
+		const testRedirect = 'https://test.example.com/callback';
+		const testState = 'test_state_' + Math.random().toString(36).substring(2, 15);
+		const testOidcNonce = Math.random().toString(36).substring(2, 15);
+		const testClientId = 'test_client_' + Math.random().toString(36).substring(2, 15);
+		const testResponseType = 'code';
+		const testScope = 'openid profile';
+
+		const url = new URL(window.location.href);
+		url.searchParams.set('domain', testDomain);
+		url.searchParams.set('nonce', testNonce);
+		url.searchParams.set('redirect_uri', testRedirect);
+		url.searchParams.set('state', testState);
+		url.searchParams.set('oidc_nonce', testOidcNonce);
+		url.searchParams.set('client_id', testClientId);
+		url.searchParams.set('response_type', testResponseType);
+		url.searchParams.set('scope', testScope);
+
+		window.location.href = url.toString();
 	}
 </script>
 
 <div
-	class="bg-no-repeat bg-cover bg-center bg-swe-landing font-satoshi bg-gray flex-grow w-full h-screen items-center flex justify-center flex-wrap flex-col"
+	class="bg-swe-landing flex h-screen w-full flex-grow flex-col flex-wrap items-center justify-center bg-gray bg-cover bg-center bg-no-repeat font-satoshi"
 	style="background-image: url('img/swe-landing.svg');"
 >
 	<div
-		class="w-96 text-center bg-white rounded-20 text-grey flex h-100 flex-col p-12 shadow-lg shadow-white"
+		class="text-grey flex h-100 w-96 flex-col rounded-20 bg-white p-12 text-center shadow-lg shadow-white"
 	>
 		{#if client_metadata.logo_uri}
-			<div class="flex justify-evenly items-stretch">
+			<div class="flex items-stretch justify-evenly">
 				<img
 					height="72"
 					width="72"
-					class="self-center mb-8"
+					class="mb-8 self-center"
 					src="img/solana_logo.png"
 					alt="Solana logo"
 				/>
 				<img
 					height="72"
 					width="72"
-					class="self-center mb-8"
+					class="mb-8 self-center"
 					src={client_metadata.logo_uri}
 					alt="Client logo"
 				/>
@@ -120,7 +163,7 @@ Resources: ${redirect}`;
 			<img
 				height="72"
 				width="72"
-				class="self-center mb-8"
+				class="mb-8 self-center"
 				src="img/solana_logo.png"
 				alt="Solana logo"
 			/>
@@ -134,18 +177,25 @@ Resources: ${redirect}`;
 
 		<WalletMultiButton onconnect={handleConnect} />
 
-		<div class="self-center mt-auto text-center font-semibold text-xs">
+		<button
+			class="mt-4 rounded bg-blue-500 px-4 py-2 text-white hover:bg-blue-600"
+			onclick={generateTestParams}
+		>
+			Generate Test Parameters
+		</button>
+
+		<div class="mt-auto self-center text-center text-xs font-semibold">
 			By using this service you agree to the <a href="/legal/terms-of-use.pdf">Terms of Use</a>
 			and
 			<a href="/legal/privacy-policy.pdf">Privacy Policy</a>.
 		</div>
 
 		{#if client_metadata.client_uri}
-			<span class="text-xs mt-4">Request linked to {client_metadata.client_uri}</span>
+			<span class="mt-4 text-xs">Request linked to {client_metadata.client_uri}</span>
 		{/if}
 	</div>
 </div>
 
 <style global lang="postcss">
-	
+	/* Your existing styles */
 </style>

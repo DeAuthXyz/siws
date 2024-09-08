@@ -1,0 +1,1897 @@
+File: ./src/app.css
+----------------------
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+
+
+File: ./src/app.d.ts
+----------------------
+// See https://kit.svelte.dev/docs/types#app
+// for information about these interfaces
+declare global {
+	namespace App {
+		// interface Error {}
+		// interface Locals {}
+		// interface PageData {}
+		// interface PageState {}
+		// interface Platform {}
+	}
+}
+
+export {};
+
+
+
+File: ./src/app.html
+----------------------
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<link rel="icon" href="%sveltekit.assets%/favicon.png" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		%sveltekit.head%
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">%sveltekit.body%</div>
+	</body>
+</html>
+
+
+
+File: ./src/lib/api/api.ts
+----------------------
+
+
+export interface Get<
+    PathParams = { [key: string]: unknown },
+    QueryParams = { [key: string]: unknown },
+    Output = { [key: string]: unknown }
+> {
+    parameters: {
+        path?: PathParams;
+        query: QueryParams;
+    };
+    responses: {
+        200: Output;
+    };
+}
+
+export interface Post<
+    PathParams = { [key: string]: unknown },
+    RequestBody = { [key: string]: unknown },
+    QueryParams = { [key: string]: unknown },
+    Output = { [key: string]: unknown }
+> {
+    parameters: {
+        path?: PathParams;
+        body: RequestBody;
+        query?: QueryParams;
+    };
+    responses: {
+        200: Output;
+    };
+}
+
+export interface Put<
+    PathParams = { [key: string]: unknown },
+    RequestBody = { [key: string]: unknown },
+    QueryParams = { [key: string]: unknown },
+    Output = { [key: string]: unknown }
+> {
+    parameters: {
+        path?: PathParams;
+        body: RequestBody;
+        query?: QueryParams;
+    };
+    responses: {
+        200: Output;
+    };
+}
+
+export interface Delete<
+    PathParams = { [key: string]: unknown },
+    QueryParams = { [key: string]: unknown },
+    Output = { [key: string]: unknown }
+> {
+    parameters: {
+        path?: PathParams;
+        query: QueryParams;
+    };
+    responses: {
+        200: Output;
+    };
+}
+
+export interface Patch<
+    PathParams = { [key: string]: unknown },
+    RequestBody = { [key: string]: unknown },
+    QueryParams = { [key: string]: unknown },
+    Output = { [key: string]: unknown }
+> {
+    parameters: {
+        path?: PathParams;
+        body: RequestBody;
+        query?: QueryParams;
+    };
+    responses: {
+        200: Output;
+    };
+}
+
+export type RecursiveJSONSchema = {
+    description?: string
+    type: string
+    const?: string
+    format?: string
+    properties?: {
+        [key: string]: RecursiveJSONSchema
+    }
+    items?: RecursiveJSONSchema
+    required?: string[]
+}
+
+
+export interface GET {
+  '/api/authorize': {
+    parameters: {        path?: never;
+        query: {    nonce: string | undefined;}
+;
+}
+;
+    responses: {    200: { redirect_url: string; } | { error: string; }}
+;
+    errors?: never;
+  };
+}
+
+export interface POST {
+  '/api/foo': {
+    parameters: {        body: { name: string; age: number; email: string; };
+        path?: never;
+        query: {    premium: string | null;}
+;
+}
+;
+    responses: {    200: { name: string; age: number; email: string; id: number; }}
+;
+    errors?: never;
+  };
+  '/api/signin': {
+    parameters: {        path?: never;
+}
+;
+    responses: {    200: { error: string; } | { redirect_url: string; } | { error: string; }}
+;
+    errors?: never;
+  };
+}
+
+export type PUT = object;
+
+export type DELETE = object;
+
+export type PATCH = object;
+
+export type APIPaths = GET & POST & PUT & DELETE & PATCH;
+
+undefined
+
+
+File: ./src/lib/api/client.ts
+----------------------
+import type { GET, POST, PUT, PATCH, DELETE } from './api.js';
+
+const APIPaths = {
+	GET: {} as GET,
+	POST: {} as POST,
+	PUT: {} as PUT,
+	PATCH: {} as PATCH,
+	DELETE: {} as DELETE
+} as const;
+
+type APIPaths = typeof APIPaths;
+
+type EndpointMethod<EP extends keyof APIPaths, M extends keyof APIPaths[EP]> = APIPaths[EP][M];
+
+// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+type Params<M extends EndpointMethod<any, any>> = M extends {
+	parameters: infer P;
+}
+	? { [K in keyof P]: undefined extends P[K] ? P[K] | undefined : P[K] }
+	: never;
+
+// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+type SuccessResponse<M extends EndpointMethod<any, any>> = M extends {
+	responses: { 200: infer S };
+}
+	? S
+	: never;
+
+// biome-ignore lint/suspicious/noExplicitAny: <explanation>
+type ErrorResponse<M extends EndpointMethod<any, any>> = M extends {
+	errors: infer E;
+}
+	? E
+	: never;
+
+type ExtendedResponse<EP extends keyof APIPaths, K extends keyof APIPaths[EP]> = Response & {
+	data?: SuccessResponse<APIPaths[EP][K]>;
+	error?: ErrorResponse<APIPaths[EP][K]>;
+};
+
+export class Svetch {
+	private baseURL: string;
+	private fetchFn: typeof fetch;
+
+	constructor(baseURL = '', fetchInstance?: typeof fetch) {
+		this.baseURL = baseURL;
+		this.fetchFn = fetchInstance || fetch;
+	}
+
+	error(status: number, message: string) {
+		const err = new Error(message);
+		// @ts-ignore
+		err.status = status;
+		throw err;
+	}
+
+	async request<M extends keyof APIPaths, EP extends keyof APIPaths[M]>(
+		endpoint: EP,
+		method: M,
+		options: Params<EndpointMethod<M, EP>>
+	): Promise<ExtendedResponse<M, EP>> {
+		const { path, query, body } = options as unknown as {
+			path?: { [key: string]: string };
+			query?: { [key: string]: unknown };
+			body?: {
+				[key: string]: unknown;
+			};
+		};
+		let updatedEndpoint = endpoint as string;
+
+		if (path) {
+			for (const [key, value] of Object.entries(path)) {
+				if (value === undefined) {
+					console.warn(`Path parameter ${key} is undefined, skipping`);
+					continue;
+				}
+				updatedEndpoint = updatedEndpoint.replace(`:${key}`, value as string);
+			}
+		}
+
+		const query_params = new URLSearchParams();
+		if (query) {
+			for (const [key, value] of Object.entries(query)) {
+				if (value === undefined) {
+					console.warn(`Query parameter ${key} is undefined, skipping`);
+					continue;
+				}
+				if (value) {
+					query_params.append(key, value.toString());
+				}
+			}
+		}
+
+		let baseUrl: string | undefined;
+
+		if (typeof window === 'undefined') {
+			baseUrl = undefined;
+		} else {
+			baseUrl = window.location.origin;
+		}
+
+		if (typeof window !== 'undefined' && !baseUrl) {
+			throw new Error('Unable to determine base URL, Please provide it in the constructor');
+		}
+
+		const url = new URL(updatedEndpoint, baseUrl);
+		url.search = query_params.toString();
+
+		const response = (await this.fetchFn(url, {
+			body: JSON.stringify(body),
+			method: method as string
+		})) as ExtendedResponse<M, EP>;
+
+		if (!response.ok) {
+			const errorResponse = await response.json();
+			response.error = { [response.status]: errorResponse } as ErrorResponse<APIPaths[M][EP]>;
+			return response;
+		}
+
+		const responseData = (await response.json()) as SuccessResponse<APIPaths[M][EP]>;
+
+		response.data = responseData;
+		return response;
+	}
+
+	get<EP extends keyof GET>(endpoint: EP, parameters: Params<GET[EP]>) {
+		return this.request(endpoint, 'GET', parameters);
+	}
+
+	post<EP extends keyof POST>(endpoint: EP, parameters: Params<POST[EP]>) {
+		return this.request(endpoint, 'POST', parameters);
+	}
+
+	put<EP extends keyof PUT>(endpoint: EP, parameters: Params<PUT[EP]>) {
+		return this.request(endpoint, 'PUT', parameters);
+	}
+
+	patch<EP extends keyof PATCH>(endpoint: EP, parameters: Params<PATCH[EP]>) {
+		return this.request(endpoint, 'PATCH', parameters);
+	}
+
+	delete<EP extends keyof DELETE>(endpoint: EP, parameters: Params<DELETE[EP]>) {
+		return this.request(endpoint, 'DELETE', parameters);
+	}
+}
+
+
+
+File: ./src/lib/auth.ts
+----------------------
+import { createPrivateKey, createPublicKey, KeyObject } from 'crypto';
+import { createJWT, validateJWT } from 'oslo/jwt';
+import { TimeSpan } from 'oslo';
+import type { AuthorizeParams, SignInParams, SiwsCookie, CodeEntry, SessionEntry } from './types';
+import { dbClient } from './db';
+import { verifySignedSignature } from './solana';
+
+let privateKey: KeyObject;
+let publicKey: KeyObject;
+
+export function initializeKeys(privateKeyPem: string) {
+	privateKey = createPrivateKey(privateKeyPem);
+	publicKey = createPublicKey(privateKey);
+}
+
+function pemToArrayBuffer(pem: string): ArrayBuffer {
+	const base64 = pem
+		.replace('-----BEGIN PRIVATE KEY-----', '')
+		.replace('-----END PRIVATE KEY-----', '')
+		.replace(/\s/g, '');
+	const binary = atob(base64);
+	const len = binary.length;
+	const bytes = new Uint8Array(len);
+	for (let i = 0; i < len; i++) {
+		bytes[i] = binary.charCodeAt(i);
+	}
+	return bytes.buffer;
+}
+
+export async function authorize(params: AuthorizeParams): Promise<[string, string]> {
+	const clientEntry = await dbClient.getClient(params.client_id);
+	if (!clientEntry) {
+		throw new Error('Unrecognized client id');
+	}
+
+	const nonce = crypto.randomUUID();
+	const sessionId = crypto.randomUUID();
+	const sessionSecret = crypto.randomUUID();
+
+	await dbClient.setSession(sessionId, {
+		siws_nonce: nonce,
+		oidc_nonce: params.nonce,
+		secret: sessionSecret,
+		signin_count: 0
+	});
+
+	const redirectUrl = new URL('/', params.redirect_uri);
+	redirectUrl.searchParams.append('nonce', nonce);
+	redirectUrl.searchParams.append('domain', new URL(params.redirect_uri).hostname);
+	redirectUrl.searchParams.append('redirect_uri', params.redirect_uri);
+	redirectUrl.searchParams.append('state', params.state || '');
+	redirectUrl.searchParams.append('client_id', params.client_id);
+	if (params.nonce) {
+		redirectUrl.searchParams.append('oidc_nonce', params.nonce);
+	}
+
+	return [redirectUrl.toString(), sessionId];
+}
+
+export async function signIn(
+	params: SignInParams,
+	sessionId: string,
+	siwsCookie: SiwsCookie
+): Promise<string> {
+	const sessionEntry = await dbClient.getSession(sessionId);
+	if (!sessionEntry) {
+		throw new Error('Session not found');
+	}
+	if (sessionEntry.signin_count > 0) {
+		throw new Error('Session has already logged in');
+	}
+
+	const isValid = await verifySignedSignature(siwsCookie.message, siwsCookie.signature);
+	if (!isValid) {
+		throw new Error('Invalid signature');
+	}
+
+	if (siwsCookie.message.nonce !== sessionEntry.siws_nonce) {
+		throw new Error('Invalid nonce');
+	}
+
+	const codeEntry: CodeEntry = {
+		address: siwsCookie.message.address,
+		nonce: params.nonce,
+		exchange_count: 0,
+		client_id: params.client_id,
+		auth_time: new Date()
+	};
+
+	const code = crypto.randomUUID();
+	await dbClient.setCode(code, codeEntry);
+
+	const newSessionEntry: SessionEntry = {
+		...sessionEntry,
+		signin_count: sessionEntry.signin_count + 1
+	};
+	await dbClient.setSession(sessionId, newSessionEntry);
+
+	const redirectUrl = new URL(params.redirect_uri);
+	redirectUrl.searchParams.append('code', code);
+	redirectUrl.searchParams.append('state', params.state);
+
+	return redirectUrl.toString();
+}
+
+export async function createIdToken(codeEntry: CodeEntry, clientId: string): Promise<string> {
+	const payload = {
+		sub: codeEntry.address,
+		aud: clientId,
+		nonce: codeEntry.nonce,
+		auth_time: Math.floor(codeEntry.auth_time.getTime() / 1000)
+	};
+
+	const keyArrayBuffer = pemToArrayBuffer(
+		privateKey.export({ format: 'pem', type: 'pkcs8' }) as string
+	);
+
+	return createJWT('RS256', keyArrayBuffer, payload, {
+		issuer: process.env.ISSUER_URL,
+		expiresIn: new TimeSpan(1, 'h'),
+		includeIssuedTimestamp: true
+	});
+}
+
+export async function createAccessToken(address: string): Promise<string> {
+	const payload = {
+		sub: address,
+		aud: [`${process.env.ISSUER_URL}/userinfo`],
+		scope: 'openid profile'
+	};
+
+	const keyArrayBuffer = pemToArrayBuffer(
+		privateKey.export({ format: 'pem', type: 'pkcs8' }) as string
+	);
+
+	return createJWT('RS256', keyArrayBuffer, payload, {
+		issuer: process.env.ISSUER_URL,
+		expiresIn: new TimeSpan(1, 'h'),
+		includeIssuedTimestamp: true
+	});
+}
+
+export async function verifyToken(token: string) {
+	const keyArrayBuffer = pemToArrayBuffer(
+		publicKey.export({ format: 'pem', type: 'spki' }) as string
+	);
+	return validateJWT('RS256', keyArrayBuffer, token);
+}
+
+
+
+File: ./src/lib/components/ConnectWallet.svelte
+----------------------
+
+
+
+File: ./src/lib/components/SignInButton.svelte
+----------------------
+
+
+
+File: ./src/lib/db.ts
+----------------------
+import type { CodeEntry, SessionEntry, ClientEntry } from './types';
+
+export interface DBClient {
+	getCode(code: string): Promise<CodeEntry | null>;
+	setCode(code: string, entry: CodeEntry): Promise<void>;
+	getSession(sessionId: string): Promise<SessionEntry | null>;
+	setSession(sessionId: string, entry: SessionEntry): Promise<void>;
+	getClient(clientId: string): Promise<ClientEntry | null>;
+	setClient(clientId: string, entry: ClientEntry): Promise<void>;
+	deleteClient(clientId: string): Promise<void>;
+}
+
+// Implement an in-memory database for demonstration purposes
+class InMemoryDBClient implements DBClient {
+	private codes: Map<string, CodeEntry> = new Map();
+	private sessions: Map<string, SessionEntry> = new Map();
+	private clients: Map<string, ClientEntry> = new Map();
+
+	async getCode(code: string): Promise<CodeEntry | null> {
+		return this.codes.get(code) || null;
+	}
+
+	async setCode(code: string, entry: CodeEntry): Promise<void> {
+		this.codes.set(code, entry);
+	}
+
+	async getSession(sessionId: string): Promise<SessionEntry | null> {
+		return this.sessions.get(sessionId) || null;
+	}
+
+	async setSession(sessionId: string, entry: SessionEntry): Promise<void> {
+		this.sessions.set(sessionId, entry);
+	}
+
+	async getClient(clientId: string): Promise<ClientEntry | null> {
+		return this.clients.get(clientId) || null;
+	}
+
+	async setClient(clientId: string, entry: ClientEntry): Promise<void> {
+		this.clients.set(clientId, entry);
+	}
+
+	async deleteClient(clientId: string): Promise<void> {
+		this.clients.delete(clientId);
+	}
+}
+
+// Export a singleton instance of the database client
+export const dbClient = new InMemoryDBClient();
+
+
+
+File: ./src/lib/index.ts
+----------------------
+// place files you want to import through the `$lib` alias in this folder.
+
+
+
+File: ./src/lib/solana.ts
+----------------------
+import { type Address, type SignatureBytes, getBase58Encoder } from '@solana/web3.js';
+// import { Address, createSolanaRpc, Rpc } from '@solana/web3.js';
+import type { SolanaMessage } from './types';
+// import { walletNameToAddressAndProfilePicture } from './walletNames';
+
+async function verifySolanaSignature(
+	address: Address,
+	signature: SignatureBytes,
+	message: string
+): Promise<boolean> {
+	// Convert the address string to a Uint8Array
+	const addressBytes = getBase58Encoder().encode(address);
+
+	// Ensure we have the correct 32-byte public key
+	console.log(addressBytes);
+	if (addressBytes.length !== 32) {
+		throw new Error('Invalid address: must decode to 32 bytes');
+	}
+
+	// Import the public key
+	const cryptoKey = await crypto.subtle.importKey('raw', addressBytes, { name: 'Ed25519' }, false, [
+		'verify'
+	]);
+
+	console.log(cryptoKey);
+
+	const signatureArray =
+		signature instanceof Uint8Array ? signature : new Uint8Array(Object.values(signature));
+
+	// Verify the signature
+	return await crypto.subtle.verify(
+		'Ed25519',
+		cryptoKey,
+		signatureArray,
+		new TextEncoder().encode(message)
+	);
+}
+
+// mock CryptoKey from public key string
+export async function verifySignedSignature(
+	message: SolanaMessage,
+	signature: SignatureBytes
+): Promise<boolean> {
+	console.log('Verifying signature:', message, signature);
+
+	return verifySolanaSignature(message.address, signature, JSON.stringify(message));
+	// return true;
+}
+
+export async function resolveUsername(address: string): Promise<string | null> {
+	// Implement your username resolution logic here
+	// If no username is found, return the address itself or null
+	try {
+		// Your resolution logic here
+		// For now, we'll just return the address
+		return address;
+	} catch (error) {
+		console.error('Error resolving username:', error);
+		return null;
+	}
+}
+
+export async function resolveAvatar(address: string): Promise<string | null> {
+	// Implement your avatar resolution logic here
+	// If no avatar is found, return null
+	try {
+		// Your resolution logic here
+		// For now, we'll return null
+		return null;
+	} catch (error) {
+		console.error('Error resolving avatar:', error);
+		return null;
+	}
+}
+
+
+
+File: ./src/lib/types.ts
+----------------------
+import type { Address, SignatureBytes } from '@solana/web3.js';
+
+export interface AuthorizeParams {
+	client_id: string;
+	redirect_uri: string;
+	scope: string;
+	response_type?: string;
+	state?: string;
+	nonce?: string;
+}
+
+export interface SignInParams {
+	redirect_uri: string;
+	state: string;
+	nonce?: string;
+	client_id: string;
+}
+
+export interface CodeEntry {
+	address: Address;
+	nonce?: string;
+	exchange_count: number;
+	client_id: string;
+	auth_time: Date;
+}
+
+export interface SessionEntry {
+	siws_nonce: string;
+	oidc_nonce?: string;
+	secret: string;
+	signin_count: number;
+}
+
+export interface ClientEntry {
+	secret: string;
+	redirect_uris: string[];
+	access_token?: string;
+}
+
+export interface SiwsCookie {
+	message: SolanaMessage;
+	signature: SignatureBytes;
+}
+
+export interface SolanaMessage {
+	domain: string;
+	address: Address;
+	statement: string;
+	uri: string;
+	version: string;
+	chainId: number;
+	nonce: string;
+	issuedAt: string;
+}
+
+export interface UserInfoClaims {
+	sub: string;
+	preferred_username?: string;
+	picture?: string;
+}
+
+
+
+File: ./src/lib/walletNames.ts
+----------------------
+// import { address, type Address, type Rpc } from '@solana/web3.js';
+// // import { TldParser as ANSTLDParser } from '@onsol/tldparser';
+// import { getProfilePicture as getProfilePictureUsingSolanaPFPStandardUpstream } from '@solflare-wallet/pfp';
+
+// interface WalletNameAndProfilePicture {
+// 	walletName: string | null;
+// 	profilePicture: string | null;
+// }
+// interface WalletAddressAndProfilePicture {
+// 	walletAddress: string | null;
+// 	profilePicture: string | null;
+// }
+
+// const removeExtension = (string: string, extension: string): string => {
+// 	const extensionWithDot = `.${extension}`;
+// 	if (string.endsWith(extensionWithDot)) {
+// 		return string.split(extensionWithDot)[0];
+// 	}
+// 	return string;
+// };
+
+// const dotGlowToWalletAddress = async (
+// 	dotGlowDomain: string
+// ): Promise<WalletAddressAndProfilePicture> => {
+// 	const dotGlowUserName = removeExtension(dotGlowDomain, 'glow');
+// 	const { body } = (await fetch(
+// 		`https://api.glow.app/glow-id/resolve?handle=${dotGlowUserName}`
+// 	).then((response) => response.json())) as {
+// 		body: {
+// 			info?: {
+// 				resolved?: string;
+// 				image?: string;
+// 			};
+// 		};
+// 	};
+// 	const walletAddress = body?.info?.resolved || null;
+// 	const profilePicture = body?.info?.image || null;
+// 	return {
+// 		walletAddress,
+// 		profilePicture
+// 	};
+// };
+// const walletAddressToDotGlow = async (wallet: Address): Promise<WalletAddressAndProfilePicture> => {
+// 	const walletString = wallet;
+// 	const { body } = await fetch(`https://api.glow.app/glow-id/resolve?wallet=${walletString}`);
+// 	const dotGlowUsername = body?.info?.handle || null;
+// 	const walletName = `${dotGlowUsername}.glow`;
+// 	const profilePicture = body?.info?.image || null;
+// 	return {
+// 		walletName,
+// 		profilePicture
+// 	};
+// };
+// const dotSolToWalletAddress = async (dotSolDomain): Promise<WalletAddressAndProfilePicture> => {
+// 	try {
+// 		const { body } = await http.get(
+// 			`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${dotSolDomain}`
+// 		);
+// 		let walletAddress = null;
+// 		const result = body?.result;
+// 		if (result !== 'Domain not found') {
+// 			walletAddress = result;
+// 		}
+// 		return {
+// 			walletAddress,
+// 			profilePicture: null
+// 		};
+// 	} catch (thrownObject) {
+// 		const error = thrownObject;
+// 		if (error.message === 'Invalid name account provided') {
+// 			return {
+// 				walletAddress: null,
+// 				profilePicture: null
+// 			};
+// 		}
+// 		throw error;
+// 	}
+// };
+// const walletAddressToDotSol = async (
+// 	rpc: Rpc,
+// 	wallet: Address
+// ): Promise<WalletNameAndProfilePicture> => {
+// 	try {
+// 		const { body } = await http.get(
+// 			// See https://github.com/Bonfida/sns-sdk#sdk-proxy
+// 			// There's a 'favorite-domain' endpoint butmost SNS users haven't set up a
+// 			// favorite domain, as the UI to do so is complex
+// 			// `https://sns-sdk-proxy.bonfida.workers.dev/favorite-domain/${wallet.toBase58()}`
+// 			`https://sns-sdk-proxy.bonfida.workers.dev/domains/${wallet}`
+// 		);
+// 		let walletName = null;
+// 		const firstDomainNoSuffix = body?.result?.[0]?.domain;
+// 		if (firstDomainNoSuffix) {
+// 			walletName = `${firstDomainNoSuffix}.sol`;
+// 		}
+// 		return {
+// 			walletName,
+// 			profilePicture: null
+// 		};
+// 	} catch (thrownObject) {
+// 		const error = thrownObject;
+// 		if (error.message === 'Invalid wallet account provided') {
+// 			return {
+// 				walletName: null,
+// 				profilePicture: null
+// 			};
+// 		}
+// 		throw error;
+// 	}
+// };
+// const dotBackpackToWalletAddress = async (
+// 	dotBackpackDomainName: string,
+// 	jwt = null
+// ): Promise<WalletAddressAndProfilePicture> => {
+// 	const dotBackpackUserName = removeExtension(dotBackpackDomainName, 'backpack');
+// 	if (!jwt) {
+// 		const { body: body2 } = (await fetch(
+// 			`https://backpack-api.xnfts.dev/users/${dotBackpackUserName}`
+// 		).then((response) => response.json())) as {
+// 			body: {
+// 				publicKeys?: {
+// 					blockchain?: string;
+// 					publicKey?: string;
+// 				}[];
+// 			};
+// 		};
+// 		const publicKeysDetails2 = body2?.publicKeys || null;
+// 		const firstPublicKeyDetails = publicKeysDetails2?.at(0);
+// 		const walletAddress2 = firstPublicKeyDetails?.publicKey || null;
+// 		return {
+// 			walletAddress: walletAddress2,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const { body } = (await fetch(
+// 		`https://backpack-api.xnfts.dev/users?usernamePrefix=${dotBackpackUserName}&blockchain=solanalimit=6`,
+// 		{
+// 			headers: {
+// 				cookie: `jwt=${jwt}`
+// 			}
+// 		}
+// 	).then((response) => response.json())) as {
+// 		body: {
+// 			users?: {
+// 				username?: string;
+// 				image?: string;
+// 				public_keys?: {
+// 					blockchain?: string;
+// 					publicKey?: string;
+// 				}[];
+// 			}[];
+// 		};
+// 	};
+// 	const users = body?.users || null;
+// 	if (!users) {
+// 		return {
+// 			walletAddress: null,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const matchingUser = users.find((user) => user.username === dotBackpackUserName);
+// 	const profilePicture = matchingUser?.image || null;
+// 	if (!matchingUser) {
+// 		return {
+// 			walletAddress: null,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const publicKeysDetails = matchingUser.public_keys || null;
+// 	if (!publicKeysDetails?.length) {
+// 		return {
+// 			walletAddress: null,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const solanaPublicKeyDetails = publicKeysDetails.find((publicKeyDetails) => {
+// 		return publicKeyDetails.blockchain === 'solana';
+// 	});
+// 	if (!solanaPublicKeyDetails) {
+// 		return {
+// 			walletAddress: null,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const walletAddress = solanaPublicKeyDetails.publicKey || null;
+// 	return {
+// 		walletAddress,
+// 		profilePicture
+// 	};
+// };
+// const walletAddressToDotBackpack = async (
+// 	wallet: Address,
+// 	jwt = null
+// ): Promise<WalletNameAndProfilePicture> => {
+// 	if (!jwt) {
+// 		return {
+// 			walletName: null,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const walletString = wallet;
+// 	const backpackAPIEndpoint = `https://backpack-api.xnfts.dev/users?usernamePrefix=${walletString}`;
+// 	const { body } = await fetch(backpackAPIEndpoint, {
+// 		headers: {
+// 			cookie: `jwt=${jwt}`
+// 		}
+// 	}).then(
+// 		(response) =>
+// 			response.json() as {
+// 				body: {
+// 					users?: {
+// 						username?: string;
+// 						image?: string;
+// 					}[];
+// 				};
+// 			}
+// 	);
+
+// 	const users = body?.users || null;
+// 	if (!users?.length) {
+// 		return {
+// 			walletName: null,
+// 			profilePicture: null
+// 		};
+// 	}
+// 	const firstUser = users[0];
+// 	const username = firstUser.username;
+// 	const profilePicture = firstUser.image || null;
+// 	const domainName = `${username}.backpack`;
+// 	return {
+// 		walletName: domainName,
+// 		profilePicture
+// 	};
+// };
+// const walletNameToAddressAndProfilePicture = async (
+// 	rpc: Rpc,
+// 	walletName: string,
+// 	jwt = null
+// ): Promise<WalletAddressAndProfilePicture> => {
+// 	let walletAddressAndProfilePicture: WalletAddressAndProfilePicture = {
+// 		walletAddress: null,
+// 		profilePicture: null
+// 	};
+// 	const parts = walletName.split('.');
+// 	if (parts.length < 2) {
+// 		return walletAddressAndProfilePicture;
+// 	}
+// 	if (walletName.endsWith('.sol')) {
+// 		walletAddressAndProfilePicture = await dotSolToWalletAddress(walletName);
+// 	}
+// 	if (walletName.endsWith('.glow')) {
+// 		walletAddressAndProfilePicture = await dotGlowToWalletAddress(walletName);
+// 	}
+// 	if (walletName.endsWith('.backpack')) {
+// 		walletAddressAndProfilePicture = await dotBackpackToWalletAddress(walletName, jwt);
+// 	}
+// 	if (
+// 		walletAddressAndProfilePicture.walletAddress &&
+// 		!walletAddressAndProfilePicture.profilePicture
+// 	) {
+// 		const solanaPFPUrl = await getProfilePictureUsingSolanaPFPStandard(
+// 			rpc,
+// 			address(walletAddressAndProfilePicture.walletAddress)
+// 		);
+// 		walletAddressAndProfilePicture.profilePicture = solanaPFPUrl || null;
+// 	}
+// 	return walletAddressAndProfilePicture;
+// };
+// const walletAddressToNameAndProfilePicture = async (
+// 	rpc: Rpc,
+// 	wallet: Address,
+// 	backpackJWT = null
+// ): Promise<WalletAddressAndProfilePicture> => {
+// 	const dotSol = await walletAddressToDotSol(rpc, wallet);
+// 	dotSol.profilePicture = solanaPFPStandardImageURL || null;
+// 	if (dotSol?.walletName && dotSol?.profilePicture) {
+// 		return dotSol;
+// 	}
+// 	const dotGlow = await walletAddressToDotGlow(wallet);
+// 	if (dotGlow?.walletName && dotGlow?.profilePicture) {
+// 		return dotGlow;
+// 	}
+// 	if (backpackJWT) {
+// 		const dotBackpack = await walletAddressToDotBackpack(wallet, backpackJWT);
+// 		if (dotBackpack?.walletName && dotBackpack?.profilePicture) {
+// 			return dotBackpack;
+// 		}
+// 	}
+// 	return {
+// 		walletName: null,
+// 		profilePicture: null
+// 	};
+// };
+
+// export {
+// 	dotBackpackToWalletAddress,
+// 	dotGlowToWalletAddress,
+// 	dotSolToWalletAddress,
+// 	walletAddressToDotBackpack,
+// 	walletAddressToDotGlow,
+// 	walletAddressToDotSol,
+// 	walletAddressToNameAndProfilePicture,
+// 	walletNameToAddressAndProfilePicture
+// };
+// //# sourceMappingURL=index.mjs.map
+
+
+
+File: ./src/params/wellKnown.ts
+----------------------
+import type { ParamMatcher } from '@sveltejs/kit';
+
+export const match: ParamMatcher = (param) => {
+	const isWellKnownPath = /^\.well-known$/i.test(param);
+	return isWellKnownPath;
+};
+
+
+
+File: ./src/routes/+layout.svelte
+----------------------
+<script lang="ts">
+	import '../app.css';
+	import { ConnectionProvider, WalletProvider } from '@bewinxed/wallet-adapter-svelte';
+	import { WalletModalProvider, WalletMultiButton } from '@bewinxed/wallet-adapter-svelte-ui';
+	import { onMount } from 'svelte';
+	const { children } = $props();
+</script>
+
+<ConnectionProvider
+	endpoint="https://api.mainnet-beta.solana.com"
+	config={{ defaultCommitment: 'confirmed' }}
+>
+	<WalletProvider wallets={[]}>
+		<WalletModalProvider>
+			{@render children()}
+		</WalletModalProvider>
+	</WalletProvider>
+</ConnectionProvider>
+
+
+
+File: ./src/routes/+page.server.ts
+----------------------
+import type { PageServerLoad } from './$types';
+
+export const load: PageServerLoad = async ({ url }) => {
+	const data = {
+		domain: url.searchParams.get('domain'),
+		nonce: url.searchParams.get('nonce'),
+		redirect: url.searchParams.get('redirect_uri') ?? 'https://www.example.com',
+		state: url.searchParams.get('state'),
+		oidc_nonce: url.searchParams.get('oidc_nonce'),
+		client_id: url.searchParams.get('client_id')
+	} as const;
+	return data;
+};
+
+
+
+File: ./src/routes/+page.svelte
+----------------------
+<script lang="ts">
+	import { onMount } from 'svelte';
+	import { createSolanaRpc } from '@solana/web3.js';
+
+	import { WalletAdapterNetwork } from '@bewinxed/wallet-adapter-base';
+	import { WalletMultiButton } from '@bewinxed/wallet-adapter-svelte-ui';
+	import { useSolana } from '@bewinxed/wallet-adapter-svelte';
+	import { Cookie } from 'oslo/cookie';
+	import type { PageData } from './$types';
+
+	// TODO: REMOVE DEFAULTS:
+	// main.ts will parse the params from the server
+	const {
+		data
+	}: {
+		data: PageData;
+	} = $props();
+
+	const { domain, nonce, redirect, state: pageState, oidc_nonce, client_id } = $derived(data);
+
+	let status = $state('Not Logged In');
+
+	const network = WalletAdapterNetwork.Mainnet;
+	const endpoint = 'https://api.mainnet-beta.solana.com';
+
+	const solana = useSolana();
+	const wallet = $derived(solana.context.wallet);
+	const rpc = $derived(solana.rpc);
+	let client_metadata: {
+		logo_uri?: string;
+		client_name?: string;
+		client_uri?: string;
+	} = {};
+
+	onMount(async () => {
+		try {
+			client_metadata = await fetch(`${window.location.origin}/client/${client_id}`).then(
+				(response) => response.json()
+			);
+		} catch (e) {
+			console.error(e);
+		}
+	});
+
+	async function handleConnect() {
+		if (!wallet) {
+			throw new Error('Wallet not connected');
+		}
+		if (wallet?.status !== 'connected') {
+			await wallet.connect();
+		}
+
+		if (wallet.address) {
+			try {
+				const expirationTime = new Date(new Date().getTime() + 2 * 24 * 60 * 60 * 1000); // 48h
+
+				const message = `You are signing-in to ${window.location.host}.
+Address: ${wallet.address}
+Nonce: ${nonce}
+Expiration: ${expirationTime.toISOString()}
+URI: ${window.location.origin}
+Version: 1
+Resources: ${redirect}`;
+
+				const encodedMessage = new TextEncoder().encode(message);
+				const signedMessage = await wallet.signMessage(encodedMessage);
+
+				const session = {
+					publicKey: wallet.address,
+					message: message,
+					signature: signedMessage
+				};
+
+				const cookie = new Cookie('solana_session', JSON.stringify(session), {
+					expires: expirationTime
+				});
+
+				document.cookie = cookie.serialize();
+
+				let oidc_nonce_param = '';
+				if (oidc_nonce != null && oidc_nonce !== '') {
+					oidc_nonce_param = `&oidc_nonce=${oidc_nonce}`;
+				}
+
+				window.location.replace(
+					`/sign_in?redirect_uri=${encodeURI(redirect)}&state=${encodeURI(pageState)}&client_id=${encodeURI(client_id)}${encodeURI(oidc_nonce_param)}`
+				);
+			} catch (e) {
+				console.error(e);
+			}
+		}
+	}
+</script>
+
+<div
+	class="bg-no-repeat bg-cover bg-center bg-swe-landing font-satoshi bg-gray flex-grow w-full h-screen items-center flex justify-center flex-wrap flex-col"
+	style="background-image: url('img/swe-landing.svg');"
+>
+	<div
+		class="w-96 text-center bg-white rounded-20 text-grey flex h-100 flex-col p-12 shadow-lg shadow-white"
+	>
+		{#if client_metadata.logo_uri}
+			<div class="flex justify-evenly items-stretch">
+				<img
+					height="72"
+					width="72"
+					class="self-center mb-8"
+					src="img/solana_logo.png"
+					alt="Solana logo"
+				/>
+				<img
+					height="72"
+					width="72"
+					class="self-center mb-8"
+					src={client_metadata.logo_uri}
+					alt="Client logo"
+				/>
+			</div>
+		{:else}
+			<img
+				height="72"
+				width="72"
+				class="self-center mb-8"
+				src="img/solana_logo.png"
+				alt="Solana logo"
+			/>
+		{/if}
+		<h5>Welcome</h5>
+		<span class="text-xs">
+			Sign-In with Solana to continue to {client_metadata.client_name
+				? client_metadata.client_name
+				: domain}
+		</span>
+
+		<WalletMultiButton onconnect={handleConnect} />
+
+		<div class="self-center mt-auto text-center font-semibold text-xs">
+			By using this service you agree to the <a href="/legal/terms-of-use.pdf">Terms of Use</a>
+			and
+			<a href="/legal/privacy-policy.pdf">Privacy Policy</a>.
+		</div>
+
+		{#if client_metadata.client_uri}
+			<span class="text-xs mt-4">Request linked to {client_metadata.client_uri}</span>
+		{/if}
+	</div>
+</div>
+
+<style global lang="postcss">
+	
+</style>
+
+
+
+File: ./src/routes/[x+2e]well-known/openid-configuration/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+
+export const GET: RequestHandler = async ({ url }) => {
+	const baseUrl = `${url.protocol}//${url.host}`;
+	const config = {
+		issuer: process.env.ISSUER_URL || baseUrl,
+		authorization_endpoint: `${baseUrl}/authorize`,
+		token_endpoint: `${baseUrl}/token`,
+		userinfo_endpoint: `${baseUrl}/userinfo`,
+		jwks_uri: `${baseUrl}/jwk`,
+		registration_endpoint: `${baseUrl}/register`,
+		scopes_supported: ['openid', 'profile'],
+		response_types_supported: ['code', 'id_token', 'token id_token'],
+		subject_types_supported: ['public'],
+		id_token_signing_alg_values_supported: ['RS256'],
+		token_endpoint_auth_methods_supported: [
+			'client_secret_basic',
+			'client_secret_post',
+			'private_key_jwt'
+		],
+		claims_supported: [
+			'sub',
+			'iss',
+			'aud',
+			'exp',
+			'iat',
+			'auth_time',
+			'nonce',
+			'preferred_username',
+			'picture'
+		],
+		grant_types_supported: ['authorization_code', 'implicit'],
+		token_endpoint_auth_signing_alg_values_supported: ['RS256'],
+		userinfo_signing_alg_values_supported: ['RS256'],
+		request_object_signing_alg_values_supported: ['RS256'],
+		response_modes_supported: ['query', 'fragment'],
+		display_values_supported: ['page', 'popup'],
+		claim_types_supported: ['normal'],
+		service_documentation: `${baseUrl}/docs`,
+		claims_parameter_supported: false,
+		request_parameter_supported: true,
+		request_uri_parameter_supported: true,
+		require_request_uri_registration: false,
+		op_policy_uri: `${baseUrl}/legal/privacy-policy.pdf`,
+		op_tos_uri: `${baseUrl}/legal/terms-of-use.pdf`
+	};
+
+	return json(config);
+};
+
+
+
+File: ./src/routes/api/authorize/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { authorize } from '$lib/auth';
+import type { AuthorizeParams } from '$lib/types';
+
+export const GET: RequestHandler = async ({ url }) => {
+	try {
+		const params: AuthorizeParams = {
+			client_id: url.searchParams.get('client_id') || '',
+			redirect_uri: url.searchParams.get('redirect_uri') || '',
+			scope: url.searchParams.get('scope') || '',
+			response_type: url.searchParams.get('response_type') || undefined,
+			state: url.searchParams.get('state') || undefined,
+			nonce: url.searchParams.get('nonce') || undefined
+		};
+
+		const [redirectUrl, sessionId] = await authorize(params);
+
+		return json(
+			{ redirect_url: redirectUrl },
+			{
+				headers: {
+					'Set-Cookie': `session=${sessionId}; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+				}
+			}
+		);
+	} catch (error) {
+		console.error(error);
+		return json({ error: 'Internal Server Error' }, { status: 500 });
+	}
+};
+
+
+
+File: ./src/routes/api/register/+server.ts
+----------------------
+
+
+
+File: ./src/routes/api/signin/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { signIn } from '$lib/auth';
+import type { SignInParams, SiwsCookie } from '$lib/types';
+
+export const POST: RequestHandler = async ({ request, cookies }) => {
+	try {
+		const body = await request.json();
+		const params: SignInParams = {
+			redirect_uri: body.redirect_uri,
+			state: body.state,
+			nonce: body.nonce,
+			client_id: body.client_id
+		};
+		const sessionId = cookies.get('session');
+		const siwsCookie: SiwsCookie = JSON.parse(cookies.get('siws') || '{}');
+
+		if (!sessionId) {
+			return json({ error: 'No session found' }, { status: 400 });
+		}
+
+		const redirectUrl = await signIn(params, sessionId, siwsCookie);
+
+		return json({ redirect_url: redirectUrl });
+	} catch (error) {
+		console.error(error);
+		return json({ error: 'Internal Server Error' }, { status: 500 });
+	}
+};
+
+
+
+File: ./src/routes/api/token/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { dbClient } from '$lib/db';
+import { createJWT } from 'oslo/jwt';
+import { TimeSpan } from 'oslo';
+
+export const POST: RequestHandler = async ({ request }) => {
+	const body = await request.formData();
+	const code = body.get('code');
+	const clientId = body.get('client_id');
+	const clientSecret = body.get('client_secret');
+
+	if (!code || !clientId || !clientSecret) {
+		return json({ error: 'invalid_request' }, { status: 400 });
+	}
+
+	const codeEntry = await dbClient.getCode(code.toString());
+	if (!codeEntry) {
+		return json({ error: 'invalid_grant' }, { status: 400 });
+	}
+
+	const client = await dbClient.getClient(clientId.toString());
+	if (!client || client.secret !== clientSecret) {
+		return json({ error: 'invalid_client' }, { status: 401 });
+	}
+
+	const jwtKey = new TextEncoder().encode(process.env.JWT_SECRET);
+
+	const idToken = await createJWT(
+		'RS256',
+		jwtKey,
+		{
+			sub: codeEntry.address,
+			aud: clientId
+		},
+		{
+			issuer: process.env.ISSUER_URL,
+			expiresIn: new TimeSpan(1, 'h'),
+			includeIssuedTimestamp: true
+		}
+	);
+
+	return json({
+		access_token: code,
+		token_type: 'Bearer',
+		id_token: idToken,
+		expires_in: 3600
+	});
+};
+
+
+
+File: ./src/routes/api/userinfo/+server.ts
+----------------------
+import { error, json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { dbClient } from '$lib/db';
+import { resolveUsername, resolveAvatar } from '$lib/solana';
+import { validateJWT } from 'oslo/jwt';
+
+export const GET: RequestHandler = async ({ request }) => {
+	const authHeader = request.headers.get('Authorization');
+	if (!authHeader || !authHeader.startsWith('Bearer ')) {
+		return json({ error: 'invalid_token' }, { status: 401 });
+	}
+
+	const token = authHeader.slice(7);
+
+	try {
+		const jwtKey = new TextEncoder().encode(process.env.JWT_SECRET);
+		await validateJWT('RS256', jwtKey, token);
+	} catch {
+		return error(401, { message: 'invalid_token' });
+	}
+
+	const codeEntry = await dbClient.getCode(token);
+
+	if (!codeEntry) {
+		return error(401, { message: 'invalid_token' });
+	}
+
+	const username = await resolveUsername(codeEntry.address);
+	const avatar = await resolveAvatar(codeEntry.address);
+
+	return json({
+		sub: `eip155:1:${codeEntry.address}`,
+		preferred_username: username,
+		picture: avatar
+	});
+};
+
+
+
+File: ./src/routes/authorize/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { authorize } from '$lib/auth';
+import type { AuthorizeParams } from '$lib/types';
+
+export const GET: RequestHandler = async ({ url, cookies }) => {
+	try {
+		const params: AuthorizeParams = {
+			client_id: url.searchParams.get('client_id') || '',
+			redirect_uri: url.searchParams.get('redirect_uri') || '',
+			scope: url.searchParams.get('scope') || '',
+			response_type: url.searchParams.get('response_type') || undefined,
+			state: url.searchParams.get('state') || undefined,
+			nonce: url.searchParams.get('nonce') || undefined
+		};
+
+		const [redirectUrl, sessionId] = await authorize(params);
+
+		cookies.set('session', sessionId, {
+			httpOnly: true,
+			secure: true,
+			sameSite: 'strict',
+			maxAge: 3600,
+			path: '/'
+		});
+
+		return json(
+			{ redirect_url: redirectUrl },
+			{
+				headers: {
+					'Set-Cookie': `session=${sessionId}; HttpOnly; Secure; SameSite=Strict; Max-Age=3600`
+				}
+			}
+		);
+	} catch (error) {
+		console.error(error);
+		return json({ error: 'Internal Server Error' }, { status: 500 });
+	}
+};
+
+
+
+File: ./src/routes/client/[clientId]/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { dbClient } from '$lib/db';
+
+export const GET: RequestHandler = async ({ params }) => {
+	const clientId = params.clientId;
+	const client = await dbClient.getClient(clientId);
+
+	if (!client) {
+		return json({ error: 'client_not_found' }, { status: 404 });
+	}
+
+	return json({
+		client_id: clientId,
+		redirect_uris: client.redirect_uris
+	});
+};
+
+export const PUT: RequestHandler = async ({ params, request }) => {
+	const clientId = params.clientId;
+	const body = await request.json();
+
+	if (!body.redirect_uris || !Array.isArray(body.redirect_uris)) {
+		return json({ error: 'invalid_redirect_uri' }, { status: 400 });
+	}
+
+	const client = await dbClient.getClient(clientId);
+	if (!client) {
+		return json({ error: 'client_not_found' }, { status: 404 });
+	}
+
+	await dbClient.setClient(clientId, {
+		...client,
+		redirect_uris: body.redirect_uris
+	});
+
+	return json({ success: true });
+};
+
+export const DELETE: RequestHandler = async ({ params }) => {
+	const clientId = params.clientId;
+	await dbClient.deleteClient(clientId);
+	return json({ success: true });
+};
+
+
+
+File: ./src/routes/docs/+page.svelte
+----------------------
+<script lang="ts">
+  import { onMount } from "svelte";
+  import { SwaggerUIBundle } from "swagger-ui-dist";
+  import "swagger-ui-dist/swagger-ui.css";
+
+  onMount(async () => {
+    SwaggerUIBundle({
+      url: "/api/schemas/openapi.json",
+      dom_id: "#swagger-ui-container",
+      defaultModelsExpandDepth: 0,
+    });
+  });
+</script>
+
+<svelte:head>
+  <title>SwaggerUI</title>
+</svelte:head>
+
+<div id="swagger-ui-container"></div>
+
+
+
+File: ./src/routes/jwk/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { createPublicKey } from 'crypto';
+
+export const GET: RequestHandler = async () => {
+	const publicKey = createPublicKey(process.env.RSA_PUBLIC_KEY as string);
+	const jwk = publicKey.export({ format: 'jwk' });
+
+	const jwks = {
+		keys: [
+			{
+				kty: jwk.kty,
+				e: jwk.e,
+				use: 'sig',
+				kid: '1',
+				alg: 'RS256',
+				n: jwk.n
+			}
+		]
+	};
+
+	return json(jwks);
+};
+
+
+
+File: ./src/routes/register/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { dbClient } from '$lib/db';
+import crypto from 'node:crypto';
+
+export const POST: RequestHandler = async ({ request }) => {
+	const body = await request.json();
+
+	if (!body.redirect_uris || !Array.isArray(body.redirect_uris)) {
+		return json({ error: 'invalid_redirect_uri' }, { status: 400 });
+	}
+
+	const clientId = crypto.randomUUID();
+	const clientSecret = crypto.randomBytes(32).toString('hex');
+
+	await dbClient.setClient(clientId, {
+		secret: clientSecret,
+		redirect_uris: body.redirect_uris
+	});
+
+	return json({
+		client_id: clientId,
+		client_secret: clientSecret,
+		redirect_uris: body.redirect_uris
+	});
+};
+
+
+
+File: ./src/routes/sign_in/+server.ts
+----------------------
+import { error, json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { signIn } from '$lib/auth';
+import type { SignInParams, SiwsCookie } from '$lib/types';
+
+export const POST: RequestHandler = async ({ request, cookies }) => {
+	try {
+		const body = await request.json();
+		const params: SignInParams = {
+			redirect_uri: body.redirect_uri,
+			state: body.state,
+			nonce: body.nonce,
+			client_id: body.client_id
+		};
+		const sessionId = cookies.get('session');
+
+		const siwsCookie: SiwsCookie = JSON.parse(cookies.get('siws') || '{}');
+
+		if (!sessionId) {
+			return json({ error: 'No session found' }, { status: 400 });
+		}
+
+		const redirectUrl = await signIn(params, sessionId, siwsCookie);
+
+		return json({ redirect_url: redirectUrl });
+	} catch (err) {
+		console.error(err);
+		return error(500, { message: 'Internal Server Error' });
+	}
+};
+
+
+
+File: ./src/routes/token/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { dbClient } from '$lib/db';
+import { createIdToken, createAccessToken } from '$lib/auth';
+
+export const POST: RequestHandler = async ({ request }) => {
+	let code: string | null = null;
+	let clientId: string | null = null;
+	let clientSecret: string | null = null;
+	let grantType: string | null = null;
+
+	const contentType = request.headers.get('content-type');
+
+	if (contentType?.includes('application/x-www-form-urlencoded')) {
+		const formData = await request.formData();
+		code = formData.get('code')?.toString() ?? null;
+		clientId = formData.get('client_id')?.toString() ?? null;
+		clientSecret = formData.get('client_secret')?.toString() ?? null;
+		grantType = formData.get('grant_type')?.toString() ?? null;
+	} else if (contentType?.includes('application/json')) {
+		const body = await request.json();
+		code = body.code ?? null;
+		clientId = body.client_id ?? null;
+		clientSecret = body.client_secret ?? null;
+		grantType = body.grant_type ?? null;
+	} else {
+		return json({ error: 'unsupported_content_type' }, { status: 400 });
+	}
+
+	if (!code || !clientId || !clientSecret || grantType !== 'authorization_code') {
+		return json({ error: 'invalid_request' }, { status: 400 });
+	}
+
+	const codeEntry = await dbClient.getCode(code);
+	if (!codeEntry) {
+		return json({ error: 'invalid_grant' }, { status: 400 });
+	}
+
+	const client = await dbClient.getClient(clientId);
+	if (!client || client.secret !== clientSecret) {
+		return json({ error: 'invalid_client' }, { status: 401 });
+	}
+
+	if (codeEntry.exchange_count > 0) {
+		return json(
+			{ error: 'invalid_grant', error_description: 'Authorization code already used' },
+			{ status: 400 }
+		);
+	}
+
+	await dbClient.setCode(code, { ...codeEntry, exchange_count: codeEntry.exchange_count + 1 });
+
+	try {
+		const idToken = await createIdToken(codeEntry, clientId);
+		const accessToken = await createAccessToken(codeEntry.address);
+
+		return json({
+			access_token: accessToken,
+			token_type: 'Bearer',
+			id_token: idToken,
+			expires_in: 3600
+		});
+	} catch (error) {
+		console.error('Error creating JWT:', error);
+		return json({ error: 'server_error' }, { status: 500 });
+	}
+};
+
+
+
+File: ./src/routes/userinfo/+server.ts
+----------------------
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
+import { resolveUsername, resolveAvatar } from '$lib/solana';
+import { verifyToken } from '$lib/auth';
+
+export const GET: RequestHandler = async ({ request }) => {
+	const authHeader = request.headers.get('Authorization');
+	if (!authHeader || !authHeader.startsWith('Bearer ')) {
+		return json({ error: 'invalid_token' }, { status: 401 });
+	}
+
+	const token = authHeader.slice(7);
+
+	try {
+		const payload = await verifyToken(token);
+		const address = payload.subject;
+
+		if (!address) {
+			throw new Error('Invalid token: missing subject');
+		}
+
+		const username = await resolveUsername(address);
+		const avatar = await resolveAvatar(address);
+
+		return json({
+			sub: `solana:${address}`,
+			preferred_username: username,
+			picture: avatar,
+			iss: process.env.ISSUER_URL,
+			aud: payload.audiences,
+			exp: payload.expiresAt,
+			iat: payload.issuedAt
+		});
+	} catch (error) {
+		console.error('Error verifying token:', error);
+		return json({ error: 'invalid_token' }, { status: 401 });
+	}
+};
+
+
+
+File: ./src/siws.test.ts
+----------------------
+import { describe, it, expect, beforeAll } from 'vitest';
+import {
+	createSignableMessage,
+	generateKeyPair,
+	getAddressFromPublicKey,
+	signBytes
+} from '@solana/web3.js';
+import base58 from 'bs58';
+import { dbClient } from '$lib/db';
+import { GET as authorize } from './routes/authorize/+server';
+import { POST as signIn } from './routes/sign_in/+server';
+import { GET as userInfo } from './routes/userinfo/+server';
+import type { AuthorizeParams, SignInParams, SiwsCookie } from '$lib/types';
+import { parseCookies } from 'oslo/cookie';
+
+describe('End-to-End Flow', () => {
+	let wallet: CryptoKeyPair;
+	const baseUrl = 'https://example.com';
+	const clientId = 'test-client-id';
+	const clientSecret = 'test-client-secret';
+
+	beforeAll(async () => {
+		// Initialize a Solana wallet
+		const privateKey = await generateKeyPair();
+		wallet = privateKey;
+		await dbClient.setClient(clientId, {
+			redirect_uris: [`${baseUrl}/callback`],
+			secret: clientSecret,
+			access_token: 'test-access-token'
+		});
+	});
+
+	it('should complete the full authentication flow', async () => {
+		// Step 1: Authorize
+		const authorizeParams: AuthorizeParams = {
+			client_id: clientId,
+			redirect_uri: `${baseUrl}/callback`,
+			scope: 'openid',
+			response_type: 'id_token',
+			state: 'state'
+		};
+
+		const authorizeResponse = await authorize({
+			url: new URL(`${baseUrl}/authorize?${new URLSearchParams(authorizeParams as any)}`),
+			// Mock the cookies.set function
+			cookies: {
+				set: (name: string, value: string) => {}
+			}
+		} as any);
+		const authorizeData = await authorizeResponse.json();
+
+		expect(authorizeData.redirect_url).toBeDefined();
+		const sessionCookie = parseCookies(authorizeResponse.headers.get('set-cookie')).get('session');
+
+		expect(sessionCookie).toBeDefined();
+
+		// Step 2: Parse authorize response
+		const authorizeRedirectUrl = new URL(authorizeData.redirect_url);
+		const nonce = authorizeRedirectUrl.searchParams.get('nonce');
+		expect(nonce).toBeDefined();
+
+		// Step 3: Prepare sign-in message
+		const message = {
+			domain: 'example.com',
+			address: await getAddressFromPublicKey(wallet.publicKey),
+			statement: 'statement',
+			uri: baseUrl,
+			version: '1',
+			chainId: 1,
+			nonce: nonce!,
+			issuedAt: new Date().toISOString()
+		};
+
+		// Step 4: Sign message (simulated for Solana)
+		const messageBytes = createSignableMessage(JSON.stringify(message));
+		const signature = await signBytes(wallet.privateKey, messageBytes.content);
+
+		// Step 5: Prepare sign-in request
+		const signInParams: SignInParams = {
+			redirect_uri: `${baseUrl}/callback`,
+			state: 'state',
+			client_id: clientId
+		};
+
+		const siwsCookie: SiwsCookie = {
+			message,
+			signature,
+			
+		};
+
+		// console.log(sessionCookie);
+		// Step 6: Sign In
+		const signInResponse = await signIn({
+			request: {
+				json: async () => signInParams
+			},
+			cookies: {
+				get: (name: string) => (name === 'session' ? sessionCookie : JSON.stringify(siwsCookie))
+			}
+		} as any);
+
+		const signInData = await signInResponse.json();
+		// console.log(signInData);
+		expect(signInData.redirect_url).toBeDefined();
+
+		// Step 7: Parse sign-in response
+		const signInRedirectUrl = new URL(signInData.redirect_url);
+		const code = signInRedirectUrl.searchParams.get('code');
+		expect(code).toBeDefined();
+
+		// Step 8: UserInfo request
+		const userInfoResponse = await userInfo({
+			request: {
+				headers: {
+					get: (name: string) => (name === 'Authorization' ? `Bearer ${code}` : null)
+				}
+			}
+		} as any);
+
+		const userInfoData = await userInfoResponse.json();
+		expect(userInfoData.sub).toBeDefined();
+		expect(userInfoData.sub).toContain(await getAddressFromPublicKey(wallet.publicKey));
+	});
+});
+
+
+

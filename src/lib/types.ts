@@ -1,4 +1,18 @@
-import type { Address, SignatureBytes } from '@solana/web3.js';
+import type { Address } from '@solana/web3.js';
+import {
+	array,
+	object,
+	optional,
+	string,
+	type InferOutput,
+	pipe,
+	url,
+	number,
+	date,
+	null_,
+	isoDateTime,
+	isoDate
+} from 'valibot';
 
 export interface AuthorizeParams {
 	client_id: string;
@@ -9,20 +23,15 @@ export interface AuthorizeParams {
 	nonce?: string;
 }
 
-export interface SignInParams {
-	redirect_uri: string;
-	state: string;
-	nonce?: string;
-	client_id: string;
-}
-
-export interface CodeEntry {
-	address: Address;
-	nonce?: string;
-	exchange_count: number;
-	client_id: string;
-	auth_time: Date;
-}
+export const SignInParamsSchema = object({
+	redirect_uri: pipe(string(), url()),
+	state: string(),
+	nonce: string(),
+	oidc_nonce: optional(string()),
+	client_id: string(),
+	response_type: string(),
+	scope: string()
+});
 
 export interface SessionEntry {
 	siws_nonce: string;
@@ -31,30 +40,51 @@ export interface SessionEntry {
 	signin_count: number;
 }
 
+export type SignInParams = InferOutput<typeof SignInParamsSchema>;
+
+export const CodeEntry = object({
+	address: string(),
+	nonce: optional(string()),
+	exchange_count: number(),
+	client_id: string(),
+	auth_time: pipe(string(), isoDate()),
+	chain_id: null_()
+});
+
+export type CodeEntry = InferOutput<typeof CodeEntry>;
+
 export interface ClientEntry {
 	secret: string;
 	redirect_uris: string[];
 	access_token?: string;
 }
 
-export interface SiwsCookie {
-	message: SolanaMessage;
-	signature: SignatureBytes;
-}
+export const SolanaMessageSchema = object({
+	domain: string(),
+	address: string(),
+	statement: string(),
+	uri: string(),
+	version: string(),
+	chainId: string(),
+	nonce: string(),
+	issued_at: string(),
+	expirationTime: optional(string()),
+	notBefore: optional(string()),
+	requestId: optional(string()),
+	resources: array(string())
+});
 
-export interface SolanaMessage {
-	domain: string;
-	address: Address;
-	statement: string;
-	uri: string;
-	version: string;
-	chainId: number;
-	nonce: string;
-	issuedAt: string;
-}
+export type SolanaMessage = InferOutput<typeof SolanaMessageSchema>;
 
 export interface UserInfoClaims {
 	sub: string;
 	preferred_username?: string;
 	picture?: string;
 }
+
+export const SiwsCookieSchema = object({
+	message: SolanaMessageSchema,
+	signature: string()
+});
+
+export type SiwsCookie = InferOutput<typeof SiwsCookieSchema>;
